@@ -1,16 +1,18 @@
-import { env } from 'cloudflare:workers';
+import { loadMetaCredential } from './meta-credentials';
 import { db, bucket, now, rawPost, postDeliveries, connection, log, hash } from './server';
 import { mayPublish } from './policy.mjs';
 // POST failures never get automatic retries: a network timeout can hide success.
 export async function graph(path:string, method='GET', params:Record<string,string>={}, file?:ArrayBuffer):Promise<any> {
-  if(!env.META_PAGE_ACCESS_TOKEN || !env.META_API_VERSION || !/^v\d+\.\d+$/.test(env.META_API_VERSION)) throw new Error('Meta er ikke koblet til.');
-  const url=new URL(`https://graph.facebook.com/${env.META_API_VERSION}/${path}`);
+  const credentials=await loadMetaCredential();
+  if(!credentials.token || !/^v\d+\.\d+$/.test(credentials.apiVersion)) throw new Error('Meta er ikke koblet til.');
+  if(method!=='GET'&&!credentials.publishingEnabled)throw Object.assign(new Error('Publisering er ikke aktivert.'),{definite:true});
+  const url=new URL(`https://graph.facebook.com/${credentials.apiVersion}/${path}`);
   let body:FormData|undefined;
   if(method==='GET') for(const [k,v] of Object.entries(params)) url.searchParams.set(k,v);
   else { body=new FormData();for(const [k,v] of Object.entries(params)) body.append(k,v);if(file)body.append('source',new Blob([file],{type:'image/jpeg'}),'bygdebladet.jpg'); }
-  const response=await fetch(url,{method,body,headers:{Authorization:`Bearer ${env.META_PAGE_ACCESS_TOKEN}`},signal:AbortSignal.timeout(25000)});
+  const response=await fetch(url,{method,body,headers:{Authorization:`Bearer ${credentials.token}`},signal:AbortSignal.timeout(25000),redirect:'manual'});
   const data:any=await response.json();
-  if(!response.ok || data.error){ const error=new Error(data.error?.message || `Meta svarte med ${response.status}`); (error as any).definite=response.status>=400 && response.status<500;throw error;}
+  if(!response.ok || data.error){ const code=Number(data.error?.code);const error=new Error(`Meta avviste forespørselen (${Number.isFinite(code)?'kode '+code:'HTTP '+response.status}). Kontroller tilgangen og innholdet.`); (error as any).definite=response.status>=400 && response.status<500;throw error;}
   return data;
 }
 async function update(id:string, values:Record<string,unknown>) {
@@ -20,7 +22,7 @@ async function ensureStage(p:any,d:any) {
   if(d.stage_id) return d.stage_id;
   const media=await bucket().get(p.image_key); if(!media) throw new Error('Det godkjente bildet mangler.');
   const bytes=await media.arrayBuffer(); if(await hash(bytes)!==p.image_hash) throw new Error('Bildet stemmer ikke med godkjenningen.');
-  const stage=await graph(`${env.META_PAGE_ID}/photos`,'POST',{published:'false',caption:p.title},bytes);
+  const stage=await graph(`${(await connection()).pageId}/photos`,'POST',{published:'false',caption:p.title},bytes);
   if(!stage.id) throw new Error('Meta returnerte ingen bilde-ID.');
   await update(d.id,{stage_id:stage.id}); d.stage_id=stage.id; return stage.id;
 }
@@ -45,7 +47,8 @@ export async function reconcile(p:any,d:any) {
 }
 export async function publishOne(id:string) {
   const p=await rawPost(id);p.channels=JSON.parse(p.channels);
-  const ds=await postDeliveries(id),config=connection();
+  const ds=await postDeliveries(id),config=await connection();
+  if(!config.publishingEnabled)return ds;
   for(const d of ds){
     if(d.state==='published')continue;
     if(['sending','unknown'].includes(d.state)){
@@ -72,7 +75,7 @@ export async function publishOne(id:string) {
       const stageId=await ensureStage(p,d);
       if(d.channel==='facebook'){
         publishing=true;
-        const result=await graph(`${env.META_PAGE_ID}/feed`,'POST',{message:p.facebook_text,attached_media:JSON.stringify([{media_fbid:stageId}])});
+        const result=await graph(`${config.pageId}/feed`,'POST',{message:p.facebook_text,attached_media:JSON.stringify([{media_fbid:stageId}])});
         await done(p,d,result.id,`https://www.facebook.com/${result.id}`);
       } else {
         let container=d.container_id;
@@ -80,14 +83,14 @@ export async function publishOne(id:string) {
           const photo=await graph(stageId,'GET',{fields:'images,source'});
           const source=photo.images?.sort((a:any,b:any)=>b.width-a.width)[0]?.source || photo.source;
           if(!source)throw new Error('Meta returnerte ingen tilgjengelig bildeadresse.');
-          const created=await graph(`${env.META_INSTAGRAM_ID}/media`,'POST',{image_url:source,caption:p.instagram_text,...(p.alt_text?{alt_text:p.alt_text}:{})});
+          const created=await graph(`${config.instagramId}/media`,'POST',{image_url:source,caption:p.instagram_text,...(p.alt_text?{alt_text:p.alt_text}:{})});
           container=created.id;await update(d.id,{container_id:container}); d.container_id=container;
         }
         const status=await graph(container,'GET',{fields:'status_code'});
         if(status.status_code==='PUBLISHED'){await reconcile(p,d);continue;}
         if(status.status_code!=='FINISHED') {await update(d.id,{state:'processing',error:'Instagram klargjør bildet. Kontroller igjen om ett minutt.'});continue;}
         publishing=true;
-        const result=await graph(`${env.META_INSTAGRAM_ID}/media_publish`,'POST',{creation_id:container});
+        const result=await graph(`${config.instagramId}/media_publish`,'POST',{creation_id:container});
         await done(p,d,result.id);
         try{const media=await graph(result.id,'GET',{fields:'permalink'});await update(d.id,{remote_url:media.permalink || null});}catch{}
       }
@@ -102,6 +105,7 @@ export async function publishOne(id:string) {
   return final;
 }
 export async function processApproved() {
+  if(!(await connection()).publishingEnabled)return 0;
   const ids=await db().prepare("SELECT id FROM posts WHERE state='approved' AND approved_revision=revision ORDER BY updated_at LIMIT 5").all<{id:string}>();
   for(const p of ids.results){await publishOne(p.id);await db().prepare("UPDATE posts SET updated_at=? WHERE id=? AND state='approved'").bind(now(),p.id).run();}
   return ids.results.length;

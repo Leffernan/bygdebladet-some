@@ -6,5 +6,7 @@ declare namespace Cloudflare {
     META_INSTAGRAM_ID?: string;
     META_PAGE_ACCESS_TOKEN?: string;
     META_API_VERSION?: string;
+    META_APP_ID?: string;
+    META_CREDENTIAL_ENCRYPTION_KEY?: string;
   }
 }

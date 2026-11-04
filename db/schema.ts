@@ -28,3 +28,12 @@ export const jobs = sqliteTable('jobs', {
   id: text('id').primaryKey(), state: text('state').notNull(), startedAt: text('started_at').notNull(),
   finishedAt: text('finished_at'), result: text('result'),
 });
+// User-provided Meta credential. The encryption key is a protected Sites secret.
+export const metaConnections = sqliteTable('meta_connections', {
+  id: text('id').primaryKey(), tokenCiphertext: text('token_ciphertext').notNull(),
+  pageId: text('page_id').notNull(), instagramId: text('instagram_id').notNull(),
+  apiVersion: text('api_version').notNull(), pageName: text('page_name').notNull(),
+  instagramUsername: text('instagram_username').notNull(), tokenExpiresAt: text('token_expires_at').notNull(),
+  publishingEnabled: integer('publishing_enabled').notNull().default(0),
+  updatedBy: text('updated_by').notNull(), updatedAt: text('updated_at').notNull(),
+});

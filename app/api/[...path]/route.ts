@@ -1,7 +1,8 @@
 import { db, bucket, human, rawPost, postDeliveries, present, settings, connection, collect, sourceImage, log, now, hash, AppError } from '@/lib/server';
 import { canApprove, editable, osloSlot } from '@/lib/policy.mjs';
 import { imageUrl } from '@/lib/articles.mjs';
-import { graph, publishOne, processApproved } from '@/lib/meta';
+import { publishOne, processApproved } from '@/lib/meta';
+import { loadMetaCredential, saveMetaCredential, setMetaPublishingEnabled, verifyMetaCredential } from '@/lib/meta-credentials';
 export const dynamic='force-dynamic';
 type Ctx={params:Promise<{path:string[]}>};
 const json=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
@@ -10,7 +11,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
  const path=(await ctx.params).path, action=path[0];
  if(req.method==='GET' && action==='data'){
   const [ps,ds,es,cfg,last]=await Promise.all([db().prepare('SELECT * FROM posts ORDER BY substr(created_at,1,16) DESC,rank ASC,created_at DESC LIMIT 300').all(),db().prepare('SELECT * FROM deliveries').all(),db().prepare('SELECT * FROM events ORDER BY created_at DESC LIMIT 50').all(),settings(),db().prepare("SELECT value FROM settings WHERE key='lastCollection'").first<{value:string}>()]);
-  return json({posts:ps.results.map((p:any)=>present(p,ds.results.filter((d:any)=>d.post_id===p.id))),events:es.results,settings:cfg,connection:connection(),lastCollection:last?JSON.parse(last.value):null,user:req.headers.get('oai-authenticated-user-email') || null});
+  return json({posts:ps.results.map((p:any)=>present(p,ds.results.filter((d:any)=>d.post_id===p.id))),events:es.results,settings:cfg,connection:await connection(),lastCollection:last?JSON.parse(last.value):null,user:req.headers.get('oai-authenticated-user-email') || null});
  }
  if(req.method==='GET' && action==='image'){
   const image=await sourceImage(new URL(req.url).searchParams.get('url') || '');
@@ -36,6 +37,22 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   const processed=await processApproved();return json({collection:result,approvedProcessed:processed});
  }
  const actor=human(req);
+ if(req.method==='POST' && action==='connection'){
+  const origin=req.headers.get('origin'),site=req.headers.get('sec-fetch-site');
+  if(origin!==new URL(req.url).origin||(site&&site!=='same-origin'))throw new AppError('Åpne appen direkte og prøv igjen.',403);
+  if(Number(req.headers.get('content-length')||0)>20000)throw new AppError('Tilkoblingsdataene er for store.');
+  const b=await body(req);
+  if(path[1]==='publishing'){
+   if(typeof b.enabled!=='boolean')throw new AppError('Velg om publisering skal være aktiv.');
+   const status=await setMetaPublishingEnabled(b.enabled,actor);
+   await log('connection',b.enabled?'Publisering til Meta er aktivert. Bare menneskelig godkjente poster kan publiseres.':'Publisering til Meta er deaktivert.',actor);
+   return json(status);
+  }
+  if(path.length!==1)throw new AppError('Fant ikke handlingen.',404);
+  const status=await saveMetaCredential(b,actor);
+  await log('connection','Meta-tilkoblingen er kontrollert og lagret. Publisering er deaktivert.',actor);
+  return json(status);
+ }
  if(req.method==='POST' && action==='collect'){
   const b=await body(req);return json(await collect(actor,b.url || undefined));
  }
@@ -46,10 +63,9 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   await log('settings',next.paused?'Automatisk kjøring er satt på pause.':'Innstillinger oppdatert.',actor);return json(next);
  }
  if(req.method==='POST' && action==='connection-test'){
-  const cfg=connection();if(!cfg.facebook)throw new AppError('Meta-tilgangen er ikke konfigurert.');
-  const page=await graph(cfg.pageId,'GET',{fields:'id,name,instagram_business_account'});
-  if(cfg.instagramId && page.instagram_business_account?.id!==cfg.instagramId)throw new AppError('Instagram-kontoen er ikke koblet til den valgte Facebook-siden.');
-  await log('connection',`Tilkobling kontrollert: ${page.name}`,actor);return json({pageName:page.name,instagramId:page.instagram_business_account?.id,publicationTested:false});
+  const cfg=await connection();if(!cfg.facebook)throw new AppError('Meta-tilgangen er ikke konfigurert eller har utløpt.');
+  const names=await verifyMetaCredential(await loadMetaCredential());
+  await log('connection',`Tilkobling kontrollert: ${names.pageName}`,actor);return json({...names,publicationTested:false});
  }
  if(action==='posts' && path[1]){
   const id=path[1],sub=path[2],p=await rawPost(id),ds=await postDeliveries(id),b=await body(req);
@@ -88,7 +104,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   if(req.method==='POST' && sub==='publish'){
    if((await settings()).paused)throw new AppError('Publisering er satt på pause.');
    if(p.state!=='approved' || p.approved_revision!==p.revision)throw new AppError('Posten må godkjennes før publisering.',409);
-   const cfg=connection();if(JSON.parse(p.channels).some((c:'facebook'|'instagram')=>!cfg[c]))throw new AppError('Koble til de valgte Meta-kontoene først.');
+   const cfg=await connection();if(!cfg.publishingEnabled)throw new AppError('Aktiver publisering under Innstillinger først.');if(JSON.parse(p.channels).some((c:'facebook'|'instagram')=>!cfg[c]))throw new AppError('Koble til de valgte Meta-kontoene først.');
    return json({deliveries:await publishOne(id)});
   }
  }

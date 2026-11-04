@@ -6,12 +6,25 @@
    `pages_manage_posts`, `instagram_basic` og `instagram_content_publish`.
 4. Hent riktig Page Access Token. Kontroller kontoens oppgaver/roller og faktiske scopes.
    Behov for App Review eller Business Verification avhenger av appens bruk og tilgang.
-5. Sett beskyttede Sites-serverinnstillinger: `META_PAGE_ID`, `META_INSTAGRAM_ID`,
-   `META_PAGE_ACCESS_TOKEN` og `META_API_VERSION` (en gjeldende støttet versjon fra Meta).
-6. Publiser ny Sites-versjon etter endring av serverinnstillinger og trykk
-   «Kontroller tilkoblingen». Dette er en lesetest, ingen publisering.
+5. Åpne appens Innstillinger. Lim inn Page Access Token i passordfeltet og oppgi
+   datoen nøkkelen må fornyes før. Appen stopper fra denne datoen, før den faktiske
+   utløpstiden. Trykk «Kontroller og lagre nøkkelen». Dette gjør bare lesekall mot Meta.
+   En User-token eller feil side/Instagram-kobling avvises. Ny nøkkel slår av publisering.
+6. Kontroller køen med godkjente poster, og velg «Aktiver publisering» når dere er klare.
+   Dette godkjenner ingen poster. Allerede godkjente poster kan deretter publiseres
+   ved de faste kjøringene. Kontroller først med én egnet post.
 7. Godkjenn ett testinnlegg som faktisk kan publiseres. Kontroller begge innleggene,
    bildet, teksten og kanalstatus før dere bruker systemet ordinært.
+
+## Lagring av nøkkelen
+
+Konto-ID-er og API-versjon ligger i Sites-serverinnstillingene. Den brukeroppgitte
+sidenøkkelen krypteres med AES-256-GCM, unik IV og autentisert kontekst før D1-lagring
+i en separat tabell. `META_CREDENTIAL_ENCRYPTION_KEY` er en beskyttet Sites-hemmelighet
+og skal ikke roteres uten samtidig migrering av kryptert innhold. Ingen nøkkel eller
+kryptert nøkkel returneres i appens data-API. Nettleseren lagrer ikke nøkkelen lokalt.
+Alle endringer krever menneskelig ChatGPT-identitet; lagring og aktivering krever
+også samme origin. Behold appen privat.
 
 ## Bilder på privat Site
 

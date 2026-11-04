@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:workers';
 import { articleUrl, frontpage, parseArticle, ORIGIN, imageUrl } from './articles.mjs';
 import type { Post, Settings } from './types';
+import { metaConnectionStatus } from './meta-credentials';
 export const now = () => new Date().toISOString();
 export function db() { if(!env.DB) throw new Error('Databasen er ikke koblet til.'); return env.DB; }
 export function bucket() { if(!env.BUCKET) throw new Error('Bildelagringen er ikke koblet til.'); return env.BUCKET; }
@@ -70,7 +71,4 @@ export async function sourceImage(url:string) {
   const bytes=await res.arrayBuffer(); if(bytes.byteLength>12000000) throw new AppError('Bildet er for stort.');
   await bucket().put(key,bytes,{httpMetadata:{contentType:type}}); return {bytes,type};
 }
-export function connection() {
-  return {facebook:!!(env.META_PAGE_ID && env.META_PAGE_ACCESS_TOKEN && env.META_API_VERSION),instagram:!!(env.META_PAGE_ID && env.META_INSTAGRAM_ID && env.META_PAGE_ACCESS_TOKEN && env.META_API_VERSION),
-    pageId:env.META_PAGE_ID || '',instagramId:env.META_INSTAGRAM_ID || '',apiVersion:env.META_API_VERSION || '',liveTested:false};
-}
+export const connection=metaConnectionStatus;
