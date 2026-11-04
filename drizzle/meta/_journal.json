@@ -15,6 +15,13 @@
       "when": 1793792945727,
       "tag": "0001_chunky_lenny_balinger",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793794236023,
+      "tag": "0002_sudden_albert_cleary",
+      "breakpoints": true
     }
   ]
 }

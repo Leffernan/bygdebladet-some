@@ -8,5 +8,7 @@ declare namespace Cloudflare {
     META_API_VERSION?: string;
     META_APP_ID?: string;
     META_CREDENTIAL_ENCRYPTION_KEY?: string;
+    APP_OWNER_EMAIL?: string;
+    APP_OWNER_NAME?: string;
   }
 }

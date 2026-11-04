@@ -2,6 +2,7 @@ import { env } from 'cloudflare:workers';
 import { articleUrl, frontpage, parseArticle, ORIGIN, imageUrl } from './articles.mjs';
 import type { Post, Settings } from './types';
 import { metaConnectionStatus } from './meta-credentials';
+import { defaultProfile } from './profile-policy.mjs';
 export const now = () => new Date().toISOString();
 export function db() { if(!env.DB) throw new Error('Databasen er ikke koblet til.'); return env.DB; }
 export function bucket() { if(!env.BUCKET) throw new Error('Bildelagringen er ikke koblet til.'); return env.BUCKET; }
@@ -23,12 +24,12 @@ export async function log(kind:string,message:string,actor='System',postId:strin
 export async function settings():Promise<Settings> {
   const rows=await db().prepare('SELECT key,value FROM settings').all<{key:string,value:string}>();
   const data=Object.fromEntries(rows.results.map(r=>[r.key,JSON.parse(r.value)]));
-  return {paused:false,topCount:5,autoCollect:true,...data};
+  return {paused:false,topCount:5,autoCollect:true,...defaultProfile,...data};
 }
 export function present(r:any, deliveries:any[]=[]):Post {
   return {id:r.id,url:r.url,title:r.title,intro:r.intro,category:r.category,imageUrl:r.image_url,credit:r.credit,ai:!!r.ai,cropX:r.crop_x,cropY:r.crop_y,
     facebookText:r.facebook_text,instagramText:r.instagram_text,altText:r.alt_text,channels:JSON.parse(r.channels),warnings:JSON.parse(r.warnings),rank:r.rank,
-    state:r.state,revision:r.revision,approvedAt:r.approved_at,approvedBy:r.approved_by,createdAt:r.created_at,updatedAt:r.updated_at,deliveries};
+    state:r.state,revision:r.revision,approvedAt:r.approved_at,approvedBy:r.approved_by,approvedByUserId:r.approved_by_user_id,createdAt:r.created_at,updatedAt:r.updated_at,deliveries};
 }
 export async function rawPost(id:string):Promise<any> { const row=await db().prepare('SELECT * FROM posts WHERE id=?').bind(id).first(); if(!row) throw new AppError('Posten finnes ikke.',404); return row; }
 export async function postDeliveries(id:string):Promise<any[]> { return (await db().prepare('SELECT * FROM deliveries WHERE post_id=?').bind(id).all()).results; }

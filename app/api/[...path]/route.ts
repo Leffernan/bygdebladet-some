@@ -3,15 +3,23 @@ import { canApprove, editable, osloSlot } from '@/lib/policy.mjs';
 import { imageUrl } from '@/lib/articles.mjs';
 import { publishOne, processApproved } from '@/lib/meta';
 import { loadMetaCredential, saveMetaCredential, setMetaPublishingEnabled, verifyMetaCredential } from '@/lib/meta-credentials';
+import { resolveUser, listUsers, saveUser } from '@/lib/users';
+import { profileInput, validateLogo } from '@/lib/profile-policy.mjs';
 export const dynamic='force-dynamic';
 type Ctx={params:Promise<{path:string[]}>};
 const json=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
 async function body(req:Request):Promise<any> {if(Number(req.headers.get('content-length') || 0)>8000000)throw new AppError('Filen er for stor.');return req.json();}
 async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
  const path=(await ctx.params).path, action=path[0];
+ const viewer=req.headers.get('oai-authenticated-user-id')?await resolveUser(req):null;
  if(req.method==='GET' && action==='data'){
   const [ps,ds,es,cfg,last]=await Promise.all([db().prepare('SELECT * FROM posts ORDER BY substr(created_at,1,16) DESC,rank ASC,created_at DESC LIMIT 300').all(),db().prepare('SELECT * FROM deliveries').all(),db().prepare('SELECT * FROM events ORDER BY created_at DESC LIMIT 50').all(),settings(),db().prepare("SELECT value FROM settings WHERE key='lastCollection'").first<{value:string}>()]);
-  return json({posts:ps.results.map((p:any)=>present(p,ds.results.filter((d:any)=>d.post_id===p.id))),events:es.results,settings:cfg,connection:await connection(),lastCollection:last?JSON.parse(last.value):null,user:req.headers.get('oai-authenticated-user-email') || null});
+  return json({posts:ps.results.map((p:any)=>present(p,ds.results.filter((d:any)=>d.post_id===p.id))),events:es.results,settings:cfg,connection:await connection(),lastCollection:last?JSON.parse(last.value):null,user:viewer?.email||null,currentUser:viewer,users:await listUsers()});
+ }
+ if(req.method==='GET' && action==='logo'){
+  const cfg=await settings();if(!cfg.logoKey)return Response.redirect(new URL('/hub-logo.svg',req.url),307);
+  const file=await bucket().get(cfg.logoKey);if(!file)return Response.redirect(new URL('/hub-logo.svg',req.url),307);
+  return new Response(file.body,{headers:{'Content-Type':cfg.logoType,'Cache-Control':'private, no-store','X-Content-Type-Options':'nosniff','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; sandbox"}});
  }
  if(req.method==='GET' && action==='image'){
   const image=await sourceImage(new URL(req.url).searchParams.get('url') || '');
@@ -36,7 +44,35 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   }
   const processed=await processApproved();return json({collection:result,approvedProcessed:processed});
  }
- const actor=human(req);
+ human(req);const member=viewer||await resolveUser(req),actor=member.displayName;
+ if(req.method==='POST'&&(action==='profile'||action==='users'||action==='logo')){
+  if(req.headers.get('origin')!==new URL(req.url).origin)throw new AppError('Åpne appen direkte og prøv igjen.',403);
+ }
+ if(req.method==='POST'&&action==='users'){
+  const b=await body(req),user=await saveUser(b,member,path[1]);
+  await log('user',`${path[1]?'Oppdatert':'Opprettet'} bruker: ${user.displayName} (${user.email}) · ${user.active?'aktiv':'deaktivert'}.`,actor);
+  return json({user});
+ }
+ if(req.method==='POST'&&action==='profile'){
+  const values=profileInput(await body(req));
+  await db().batch(Object.entries(values).map(([k,v])=>db().prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(k,JSON.stringify(v))));
+  await log('settings','Oppdatert navn og profilfarge for løsningen.',actor);return json(await settings());
+ }
+ if(req.method==='POST'&&action==='logo'){
+  const cfg=await settings();let values;
+  if(path[1]==='reset')values={logoKey:'',logoType:'',logoFileName:'',logoUpdatedAt:now()};
+  else {
+   if(Number(req.headers.get('content-length')||0)>5300000)throw new AppError('Logoen kan ikke være større enn 5 MB.');
+   const form=await req.formData(),file=form.get('file');if(!(file instanceof File))throw new AppError('Velg en logofil.');
+   if(file.size>5*1024*1024)throw new AppError('Logoen kan ikke være større enn 5 MB.');
+   const bytes=new Uint8Array(await file.arrayBuffer()),extension=validateLogo(bytes,file.type),key=`profile/logo/${crypto.randomUUID()}.${extension}`;
+   await bucket().put(key,bytes,{httpMetadata:{contentType:file.type}});
+   values={logoKey:key,logoType:file.type,logoFileName:file.name.slice(0,200),logoUpdatedAt:now()};
+  }
+  await db().batch(Object.entries(values).map(([k,v])=>db().prepare('INSERT INTO settings(key,value) VALUES(?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value').bind(k,JSON.stringify(v))));
+  if(cfg.logoKey)await bucket().delete(cfg.logoKey).catch(()=>{});
+  await log('settings',path[1]==='reset'?'Tilbakestilte logoen til standardlogo.':'Oppdaterte logoen i løsningen.',actor);return json(await settings());
+ }
  if(req.method==='POST' && action==='connection'){
   const origin=req.headers.get('origin'),site=req.headers.get('sec-fetch-site');
   if(origin!==new URL(req.url).origin||(site&&site!=='same-origin'))throw new AppError('Åpne appen direkte og prøv igjen.',403);
@@ -77,7 +113,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    if(!title)throw new AppError('Skriv en tittel.');
    const state=b.state==='rejected'?'rejected':'draft';
    const result=await db().batch([
-    db().prepare(`UPDATE posts SET title=?,category=?,image_url=?,credit=?,ai=?,crop_x=?,crop_y=?,facebook_text=?,instagram_text=?,alt_text=?,channels=?,state=?,revision=revision+1,approved_revision=NULL,approved_at=NULL,approved_by=NULL,image_key=NULL,image_hash=NULL,updated_at=? WHERE id=? AND revision=? AND state!='published' AND NOT EXISTS(SELECT 1 FROM deliveries WHERE post_id=? AND state IN ('sending','unknown','published','processing'))`)
+    db().prepare(`UPDATE posts SET title=?,category=?,image_url=?,credit=?,ai=?,crop_x=?,crop_y=?,facebook_text=?,instagram_text=?,alt_text=?,channels=?,state=?,revision=revision+1,approved_revision=NULL,approved_at=NULL,approved_by=NULL,approved_by_user_id=NULL,image_key=NULL,image_hash=NULL,updated_at=? WHERE id=? AND revision=? AND state!='published' AND NOT EXISTS(SELECT 1 FROM deliveries WHERE post_id=? AND state IN ('sending','unknown','published','processing'))`)
      .bind(title,String(b.category ?? p.category).slice(0,60),imageUrl(b.imageUrl ?? p.image_url),String(b.credit ?? p.credit).slice(0,180),Number(b.ai ?? !!p.ai),Math.max(0,Math.min(1,Number(b.cropX ?? p.crop_x))),Math.max(0,Math.min(1,Number(b.cropY ?? p.crop_y))),fb,ig,String(b.altText ?? p.alt_text).slice(0,1000),JSON.stringify(channels),state,now(),id,p.revision,id),
     db().prepare("DELETE FROM deliveries WHERE post_id=? AND state IN ('ready','failed') AND EXISTS(SELECT 1 FROM posts WHERE id=? AND revision=? AND approved_revision IS NULL)").bind(id,id,p.revision+1),
    ]);
@@ -93,7 +129,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    const digest=await hash(data),key=`approved/${id}/${p.revision}-${digest}.jpg`;await bucket().put(key,data,{httpMetadata:{contentType:'image/jpeg'}});
    const channels:string[]=JSON.parse(p.channels),date=now();
    const result=await db().batch([
-    db().prepare("UPDATE posts SET state='approved',approved_revision=revision,approved_by=?,approved_at=?,image_key=?,image_hash=?,updated_at=? WHERE id=? AND revision=? AND state='draft'").bind(actor,date,key,digest,date,id,b.revision),
+    db().prepare("UPDATE posts SET state='approved',approved_revision=revision,approved_by=?,approved_by_user_id=?,approved_at=?,image_key=?,image_hash=?,updated_at=? WHERE id=? AND revision=? AND state='draft'").bind(actor,member.id,date,key,digest,date,id,b.revision),
     ...channels.map(c=>db().prepare(`INSERT INTO deliveries(id,post_id,channel,revision,state,updated_at) SELECT ?,?,?,?,'ready',? WHERE EXISTS(SELECT 1 FROM posts WHERE id=? AND state='approved' AND approved_revision=?) ON CONFLICT(id) DO NOTHING`).bind(id+':'+c,id,c,b.revision,date,id,b.revision)),
    ]);
    if(!result[0].meta.changes)throw new AppError('Posten er endret. Kontroller den nyeste versjonen.',409);
@@ -110,5 +146,5 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
  }
  throw new AppError('Fant ikke handlingen.',404);
 }
-async function safe(req:Request,ctx:Ctx){try{return await dispatch(req,ctx);}catch(e){const message=e instanceof Error?e.message:'Noe gikk galt.';return json({error:message},e instanceof AppError?e.status:400);}}
+async function safe(req:Request,ctx:Ctx){try{return await dispatch(req,ctx);}catch(e){const message=e instanceof Error?e.message:'Noe gikk galt.';return json({error:message},e instanceof Error&&[401,403,404,409].includes((e as any).status)?(e as any).status:400);}}
 export const GET=safe;export const POST=safe;export const PATCH=safe;

@@ -10,6 +10,7 @@ export const posts = sqliteTable('posts', {
   warnings: text('warnings').notNull().default('[]'), rank: integer('rank').notNull().default(0),
   state: text('state').notNull().default('draft'), revision: integer('revision').notNull().default(1),
   approvedRevision: integer('approved_revision'), approvedBy: text('approved_by'), approvedAt: text('approved_at'),
+  approvedByUserId: text('approved_by_user_id'),
   imageKey: text('image_key'), imageHash: text('image_hash'),
   createdAt: text('created_at').notNull(), updatedAt: text('updated_at').notNull(),
 });
@@ -27,6 +28,12 @@ export const settings = sqliteTable('settings', { key: text('key').primaryKey(),
 export const jobs = sqliteTable('jobs', {
   id: text('id').primaryKey(), state: text('state').notNull(), startedAt: text('started_at').notNull(),
   finishedAt: text('finished_at'), result: text('result'),
+});
+export const appUsers = sqliteTable('app_users', {
+  id:text('id').primaryKey(),email:text('email').notNull().unique(),displayName:text('display_name').notNull(),
+  role:text('role').notNull().default('editor'),active:integer('active').notNull().default(1),
+  authSubject:text('auth_subject').unique(),lastSeenAt:text('last_seen_at'),
+  createdAt:text('created_at').notNull(),updatedAt:text('updated_at').notNull(),
 });
 // User-provided Meta credential. The encryption key is a protected Sites secret.
 export const metaConnections = sqliteTable('meta_connections', {

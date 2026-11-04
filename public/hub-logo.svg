@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 544.37 145.04" role="img" aria-labelledby="title">
+  <title id="title">Bygdebladet</title>
+  <defs>
+    <style>
+      .logo-background { fill: #d81d1e; }
+      .logo-text,
+      .logo-shadow {
+        font-family: FuturaDisplay, "Futura Display", Futura, "Century Gothic", Arial, sans-serif;
+        font-size: 100.19px;
+      }
+      .logo-text { fill: #fff; }
+      .logo-shadow { fill: #231f20; }
+    </style>
+  </defs>
+  <rect class="logo-background" width="544.37" height="145.04"/>
+  <text class="logo-shadow" transform="translate(51.86 102.16)" textLength="446" lengthAdjust="spacingAndGlyphs">bygdebladet</text>
+  <text class="logo-text" transform="translate(49.03 99.33)" textLength="446" lengthAdjust="spacingAndGlyphs">bygdebladet</text>
+</svg>

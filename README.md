@@ -34,6 +34,24 @@ blir «ukjent utfall», ikke automatisk repetisjon. Meta-status må avklares fø
 Se `docs/META_OPPSETT.md`. Faktisk publisering er ikke verifisert før eieren kobler til
 Meta og tester med et uttrykkelig godkjent innlegg. Ingen tilgangsnøkler ligger i repoet.
 
+## Brukere og profil
+
+Toppfeltet følger produksjonshuben. Innstillinger → Profil styrer avisnavn, løsningsnavn,
+profilfarge og logo for arbeidsrommet. Postbildenes redaksjonelle mal er separat;
+godkjente bilder endres aldri av en profilendring. Logoer lagres i R2 og valideres før bruk.
+
+Innstillinger → Brukere viser aktive og deaktiverte brukere, første innlogging og sist sett.
+Navn og e-post kan registreres før personen logger inn. ChatGPT bekrefter identiteten,
+og første innlogging binder kontoen til det stabile, Site-spesifikke subjektet. Alle aktive
+brukere har full tilgang. Eieren og egen konto kan ikke deaktiveres. Historikk slettes ikke.
+En bruker må også ha adgang gjennom Sites-delingen i ChatGPT; brukeropprettelsen alene
+sender ingen invitasjon og endrer ikke Sites-tilgangen. Skjemaet har en kopierbar forespørsel
+for å fullføre delingen i ChatGPT. Sites-koblingen kan ikke kalles fra denne appen.
+
+`APP_OWNER_EMAIL` og `APP_OWNER_NAME` er native Sites-innstillinger hentet fra den
+bekreftede eieren. Den eksisterende eieren registreres automatisk. Andre kan ikke
+registrere seg selv. Godkjenninger lagrer både bruker-ID og navnet ved godkjenning.
+
 ## Automatisk oppdatering
 
 En lenket Sites-plan kaller den private `/api/automation`-ruten. Hentingen får fire
