@@ -1,0 +1,34 @@
+name: Bygdebladet SoMe - manuell synkronisering
+on:
+  workflow_dispatch:
+    inputs:
+      force_collection:
+        description: Hent toppsaker utenom de fire daglige tidspunktene
+        type: boolean
+        default: true
+permissions:
+  contents: read
+concurrency:
+  group: bygdebladet-some
+  cancel-in-progress: false
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Hent utkast og behandle allerede godkjente poster
+        env:
+          SOME_SITE_URL: ${{ secrets.SOME_SITE_URL }}
+          SOME_SITE_SERVICE_TOKEN: ${{ secrets.SOME_SITE_SERVICE_TOKEN }}
+          FORCE_COLLECTION: ${{ inputs.force_collection }}
+        run: |
+          if [ "$FORCE_COLLECTION" = "true" ]; then
+            python python/sync.py --force-collection
+          else
+            python python/sync.py
+          fi
+# The linked Sites schedule owns recurring runs. Do not enable a second scheduler.
