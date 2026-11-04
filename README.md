@@ -1,0 +1,1 @@
+# bygdebladet-some
