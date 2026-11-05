@@ -29,6 +29,15 @@ godkjenningen. Endringer er sperret når en kanal er publisert eller utfallet er
 Hver kanal har egen status og et atomisk sendelås. Nettverksfeil under siste sendekall
 blir «ukjent utfall», ikke automatisk repetisjon. Meta-status må avklares først.
 
+Mens arbeidsrommet er åpent, følger én uavhengig kontroll hele publiseringskøen
+hvert 65. sekund, også når postvinduet er lukket. Den følger bare allerede
+godkjente poster og prøver ikke feilede kanaler automatisk. Hver beholder
+kontrolleres opptil fem ganger; ved fortsatt venting vises en tydelig melding.
+En statusoppdatering hvert minutt starter ikke kontrolltimeren på nytt.
+Pause og deaktivert publisering stopper kontrollen. Når appen er lukket, følger
+de eksisterende automatiske kjøringene opp køen. Samtidige kontroller bruker
+atomiske låser og kan ikke sette en publisert kanal tilbake til klar.
+
 ## Meta-oppsett
 
 Se `docs/META_OPPSETT.md`. Faktisk publisering er ikke verifisert før eieren kobler til

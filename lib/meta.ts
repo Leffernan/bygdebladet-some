@@ -1,5 +1,5 @@
 import { loadMetaCredential } from './meta-credentials';
-import { db, bucket, now, rawPost, postDeliveries, connection, log, hash } from './server';
+import { db, bucket, now, rawPost, postDeliveries, connection, settings, log, hash } from './server';
 import { mayPublish } from './policy.mjs';
 // POST failures never get automatic retries: a network timeout can hide success.
 export async function graph(path:string, method='GET', params:Record<string,string>={}, file?:ArrayBuffer):Promise<any> {
@@ -15,8 +15,9 @@ export async function graph(path:string, method='GET', params:Record<string,stri
   if(!response.ok || data.error){ const code=Number(data.error?.code);const error=new Error(`Meta avviste forespørselen (${Number.isFinite(code)?'kode '+code:'HTTP '+response.status}). Kontroller tilgangen og innholdet.`); (error as any).definite=response.status>=400 && response.status<500;throw error;}
   return data;
 }
-async function update(id:string, values:Record<string,unknown>) {
-  const keys=Object.keys(values); await db().prepare(`UPDATE deliveries SET ${keys.map(k=>k+'=?').join(',')},updated_at=? WHERE id=?`).bind(...Object.values(values),now(),id).run();
+async function update(id:string, values:Record<string,unknown>, expected?:Record<string,unknown>) {
+  const keys=Object.keys(values),guards=Object.keys(expected||{});
+  return db().prepare(`UPDATE deliveries SET ${[...keys.map(k=>k+'=?'),'updated_at=?'].join(',')} WHERE id=?${guards.map(k=>' AND '+k+' IS ?').join('')}`).bind(...Object.values(values),now(),id,...Object.values(expected||{})).run();
 }
 async function ensureStage(p:any,d:any) {
   if(d.stage_id) return d.stage_id;
@@ -45,30 +46,38 @@ export async function reconcile(p:any,d:any) {
   }
   return false;
 }
-export async function publishOne(id:string) {
+export async function publishOne(id:string, options:{continuationOnly?:boolean}={}) {
   const p=await rawPost(id);p.channels=JSON.parse(p.channels);
   const ds=await postDeliveries(id),config=await connection();
-  if(!config.publishingEnabled)return ds;
+  if(!config.publishingEnabled||(await settings()).paused)return ds;
   for(const d of ds){
-    if(d.state==='published')continue;
+    if(d.state==='published'||(options.continuationOnly&&d.state==='failed'))continue;
     if(['sending','unknown'].includes(d.state)){
       if(d.state==='sending' && Date.now()-Date.parse(d.updated_at)<120000)continue;
-      await update(d.id,{state:'unknown',error:'Utfallet må kontrolleres hos Meta før ny publisering.'});
+      const claimed=await update(d.id,{state:'unknown',error:'Utfallet må kontrolleres hos Meta før ny publisering.'},{state:d.state,updated_at:d.updated_at,revision:d.revision});
+      if(!claimed.meta.changes)continue;
       try{await reconcile(p,d);}catch{} continue;
     }
+    let resume=false;
     if(d.state==='processing'){
       if(Date.now()-Date.parse(d.updated_at)<60000)continue;
+      // Only one tab or scheduled run may check and resume this snapshot.
+      const expected={state:'processing',revision:d.revision,container_id:d.container_id};
+      const claimed=await update(d.id,{}, {...expected,updated_at:d.updated_at});
+      if(!claimed.meta.changes)continue;
       try {
         const status=await graph(d.container_id,'GET',{fields:'status_code'});
-        if(status.status_code==='FINISHED'){await update(d.id,{state:'ready'});d.state='ready';}
+        if(status.status_code==='FINISHED')resume=true;
         else if(status.status_code==='PUBLISHED') await reconcile(p,d);
-        else if(['ERROR','EXPIRED'].includes(status.status_code)) await update(d.id,{state:'failed',container_id:null,error:'Instagram-beholderen feilet. Prøv igjen.'});
-        else await update(d.id,{error:'Instagram klargjør fortsatt bildet. Kontroller igjen om ett minutt.'});
-      }catch(e){await update(d.id,{error:e instanceof Error?e.message:'Kunne ikke kontrollere Instagram.'});}
-      if(d.state!=='ready')continue;
+        else if(['ERROR','EXPIRED'].includes(status.status_code)) await update(d.id,{state:'failed',container_id:null,error:'Instagram-beholderen feilet. Prøv igjen.'},expected);
+        else await update(d.id,{error:'Instagram har ennå ikke bekreftet at bildet er klart. Bruk «Kontroller / publiser» hvis dette vedvarer.'},expected);
+      }catch(e){await update(d.id,{error:e instanceof Error?e.message:'Kunne ikke kontrollere Instagram.'},expected);}
+      if(!resume)continue;
     }
-    if(!mayPublish(p,d) || !config[d.channel as 'facebook'|'instagram']) continue;
-    const lock=await db().prepare(`UPDATE deliveries SET state='sending',updated_at=? WHERE id=? AND state IN ('ready','failed') AND revision=? AND EXISTS (SELECT 1 FROM posts WHERE id=? AND state='approved' AND approved_revision=revision)`).bind(now(),d.id,p.revision,p.id).run();
+    if(!mayPublish(p,resume?{...d,state:'ready'}:d) || !config[d.channel as 'facebook'|'instagram'] || (await settings()).paused) continue;
+    // Claim processing directly; resetting it to ready could overwrite a result
+    // from a concurrent publisher and allow the same post to be sent twice.
+    const lock=await db().prepare(`UPDATE deliveries SET state='sending',updated_at=? WHERE id=? AND state=? AND revision=? AND container_id IS ? AND EXISTS (SELECT 1 FROM posts WHERE id=? AND state='approved' AND approved_revision=revision)`).bind(now(),d.id,d.state,p.revision,d.container_id||null,p.id).run();
     if(!lock.meta.changes)continue;
     let publishing=false;
     try {
@@ -86,9 +95,9 @@ export async function publishOne(id:string) {
           const created=await graph(`${config.instagramId}/media`,'POST',{image_url:source,caption:p.instagram_text,...(p.alt_text?{alt_text:p.alt_text}:{})});
           container=created.id;await update(d.id,{container_id:container}); d.container_id=container;
         }
-        const status=await graph(container,'GET',{fields:'status_code'});
+        const status=resume?{status_code:'FINISHED'}:await graph(container,'GET',{fields:'status_code'});
         if(status.status_code==='PUBLISHED'){await reconcile(p,d);continue;}
-        if(status.status_code!=='FINISHED') {await update(d.id,{state:'processing',error:'Instagram klargjør bildet. Kontroller igjen om ett minutt.'});continue;}
+        if(status.status_code!=='FINISHED') {await update(d.id,{state:'processing',error:'Instagram klargjør bildet. Appen kontrollerer automatisk mens den er åpen.'});continue;}
         publishing=true;
         const result=await graph(`${config.instagramId}/media_publish`,'POST',{creation_id:container});
         await done(p,d,result.id);

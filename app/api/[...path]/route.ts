@@ -142,7 +142,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    if((await settings()).paused)throw new AppError('Publisering er satt på pause.');
    if(p.state!=='approved' || p.approved_revision!==p.revision)throw new AppError('Posten må godkjennes før publisering.',409);
    const cfg=await connection();if(!cfg.publishingEnabled)throw new AppError('Aktiver publisering under Innstillinger først.');if(JSON.parse(p.channels).some((c:'facebook'|'instagram')=>!cfg[c]))throw new AppError('Koble til de valgte Meta-kontoene først.');
-   return json({deliveries:await publishOne(id)});
+   return json({deliveries:await publishOne(id,{continuationOnly:b.continuationOnly===true})});
   }
  }
  throw new AppError('Fant ikke handlingen.',404);

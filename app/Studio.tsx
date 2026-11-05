@@ -4,6 +4,7 @@ import { LayoutGrid, CheckCheck, History, Settings2, RefreshCw, Plus, Search, Ch
 import type { Post,Settings,Channel,AppUser } from '@/lib/types';
 import { drawPost } from '@/lib/render';
 import {apiRequest as api,NEWS_IMPORT_PATH} from '@/lib/client-api.mjs';
+import {startPublicationMonitor} from '@/lib/publication-monitor.mjs';
 import MetaConnectionForm, {type MetaConnection} from './MetaConnectionForm';
 import ProfileSettings, {profileLogo} from './ProfileSettings';
 import UserSettings from './UserSettings';
@@ -21,8 +22,10 @@ function Canvas({post,onReady}:{post:Post;onReady?:(canvas:HTMLCanvasElement|nul
 }
 export default function Studio(){
  const [data,setData]=useState<Data|null>(null),[page,setPage]=useState('queue'),[settingsTab,setSettingsTab]=useState('profile'),[filter,setFilter]=useState('draft'),[search,setSearch]=useState(''),[selected,setSelected]=useState<Post|null>(null),[toast,setToast]=useState(''),[error,setError]=useState(''),[dataError,setDataError]=useState(''),[busy,setBusy]=useState(false),[importOpen,setImportOpen]=useState(false),[url,setUrl]=useState('');
- const load=useCallback(async()=>{try{setData(await api('data'));setDataError('');}catch(e){setDataError((e as Error).message);}},[]);
+ const currentData=useRef<Data|null>(null);currentData.current=data;
+ const load=useCallback(async()=>{try{const fresh:Data=await api('data');currentData.current=fresh;setData(fresh);setSelected(previous=>previous?.state==='approved'?fresh.posts.find(p=>p.id===previous.id)||previous:previous);setDataError('');}catch(e){setDataError((e as Error).message);}},[]);
  useEffect(()=>{const query=new URLSearchParams(location.search);if(query.get('settings')==='1'){setPage('settings');setSettingsTab(query.get('tab')||'automation');}load();const timer=setInterval(load,60000);return()=>clearInterval(timer);},[load]);
+ useEffect(()=>startPublicationMonitor({getData:()=>currentData.current,publish:(id:string)=>api('posts/'+id+'/publish','POST',{continuationOnly:true}),refresh:load,onError:(e:Error)=>setError(e.message)}),[load]);
  useEffect(()=>{if(toast){const t=setTimeout(()=>setToast(''),6500);return()=>clearTimeout(t);}},[toast]);
  async function fetchNews(single?:string){setBusy(true);setError('');try{const r=await api(NEWS_IMPORT_PATH,'POST',single?{url:single}:{});setToast(`${r.added} nye utkast hentet. ${r.existing} finnes allerede.`);await load();setError(r.errors.length?r.errors.join('\n'):'');setImportOpen(false);setUrl('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
  async function saveSettings(next:Partial<Settings>){try{await api('settings','POST',next);await load();setToast('Innstillingene er lagret.');}catch(e){setError((e as Error).message);}}
@@ -44,13 +47,7 @@ export default function Studio(){
 }
 function Editor({initial,connected,paused,onClose,onUpdate}:{initial:Post;connected:Data['connection'];paused:boolean;onClose:()=>void;onUpdate:(message:string,keepOpen?:boolean)=>Promise<void>}){
  const [post,setPost]=useState<Post>(initial),[tab,setTab]=useState<Channel>('instagram'),[checks,setChecks]=useState({content:false,credit:false,privacy:false}),[busy,setBusy]=useState(false),[error,setError]=useState(''),[canvas,setCanvas]=useState<HTMLCanvasElement|null>(null);
- const dirty=JSON.stringify(post)!==JSON.stringify(initial),locked=initial.state==='published'||initial.deliveries.some(d=>['sending','processing','unknown','published'].includes(d.state));
- const pollCount=useRef(0);
- useEffect(()=>{
-  if(initial.state!=='approved'||paused||!connected.publishingEnabled||!initial.channels.every(c=>connected[c])||pollCount.current>=5||!initial.deliveries.some(d=>['ready','sending','processing'].includes(d.state)))return;
-  const timer=setTimeout(async()=>{pollCount.current++;setBusy(true);try{await api('posts/'+initial.id+'/publish','POST',{});await onUpdate('Publiseringsstatus er kontrollert.',true);}catch(e){setError((e as Error).message);}finally{setBusy(false);}},65000);
-  return()=>clearTimeout(timer);
- },[initial,paused,connected]);
+ const dirty=(['title','category','imageUrl','credit','ai','cropX','cropY','facebookText','instagramText','altText','channels'] as const).some(k=>JSON.stringify(post[k])!==JSON.stringify(initial[k])),locked=initial.state==='published'||initial.deliveries.some(d=>['sending','processing','unknown','published'].includes(d.state));
  const ready=useCallback((c:HTMLCanvasElement|null,err?:string)=>{setCanvas(c);if(err)setError(err);},[]);
  const change=(next:Partial<Post>)=>{setPost(p=>({...p,...next}));setChecks({content:false,credit:false,privacy:false});};
  useEffect(()=>{const close=(e:KeyboardEvent)=>{if(e.key==='Escape'&&!busy)onClose();};document.addEventListener('keydown',close);const old=document.body.style.overflow;document.body.style.overflow='hidden';return()=>{document.body.style.overflow=old;document.removeEventListener('keydown',close);};},[onClose,busy]);
