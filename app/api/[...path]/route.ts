@@ -90,7 +90,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   await log('connection','Meta-tilkoblingen er kontrollert og lagret. Publisering er deaktivert.',actor);
   return json(status);
  }
- if(req.method==='POST' && action==='collect'){
+ if(req.method==='POST' && (action==='collect'||(action==='news'&&path[1]==='import'&&path.length===2))){
   const b=await body(req);return json(await collect(actor,b.url || undefined));
  }
  if(req.method==='POST' && action==='settings'){

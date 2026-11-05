@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties } from 're
 import { LayoutGrid, CheckCheck, History, Settings2, RefreshCw, Plus, Search, ChevronRight, ArrowUpRight, X, Download, Check, ShieldCheck, AlertTriangle, Pause, Play, Image as ImageIcon, Loader2, Send, FileText, Users, LogOut } from 'lucide-react';
 import type { Post,Settings,Channel,AppUser } from '@/lib/types';
 import { drawPost } from '@/lib/render';
-import {apiRequest as api} from '@/lib/client-api.mjs';
+import {apiRequest as api,NEWS_IMPORT_PATH} from '@/lib/client-api.mjs';
 import MetaConnectionForm, {type MetaConnection} from './MetaConnectionForm';
 import ProfileSettings, {profileLogo} from './ProfileSettings';
 import UserSettings from './UserSettings';
@@ -24,7 +24,7 @@ export default function Studio(){
  const load=useCallback(async()=>{try{setData(await api('data'));setDataError('');}catch(e){setDataError((e as Error).message);}},[]);
  useEffect(()=>{const query=new URLSearchParams(location.search);if(query.get('settings')==='1'){setPage('settings');setSettingsTab(query.get('tab')||'automation');}load();const timer=setInterval(load,60000);return()=>clearInterval(timer);},[load]);
  useEffect(()=>{if(toast){const t=setTimeout(()=>setToast(''),6500);return()=>clearTimeout(t);}},[toast]);
- async function fetchNews(single?:string){setBusy(true);setError('');try{const r=await api('collect','POST',single?{url:single}:{});setToast(`${r.added} nye utkast hentet. ${r.existing} finnes allerede.`);await load();setError(r.errors.length?r.errors.join('\n'):'');setImportOpen(false);setUrl('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
+ async function fetchNews(single?:string){setBusy(true);setError('');try{const r=await api(NEWS_IMPORT_PATH,'POST',single?{url:single}:{});setToast(`${r.added} nye utkast hentet. ${r.existing} finnes allerede.`);await load();setError(r.errors.length?r.errors.join('\n'):'');setImportOpen(false);setUrl('');}catch(e){setError((e as Error).message);}finally{setBusy(false);}}
  async function saveSettings(next:Partial<Settings>){try{await api('settings','POST',next);await load();setToast('Innstillingene er lagret.');}catch(e){setError((e as Error).message);}}
  const counts=Object.fromEntries(['draft','approved','published','rejected'].map(s=>[s,data?.posts.filter(p=>p.state===s).length||0]));
  const posts=data?.posts.filter(p=>p.state===filter&&[p.title,p.category,p.intro].join(' ').toLowerCase().includes(search.toLowerCase()))||[];

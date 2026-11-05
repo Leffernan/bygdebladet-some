@@ -1,8 +1,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {fetchSource,SOURCE_USER_AGENT} from '../lib/source-fetch.mjs';
-import {apiRequest} from '../lib/client-api.mjs';
+import {apiRequest,NEWS_IMPORT_PATH} from '../lib/client-api.mjs';
 const wait=async()=>{};
+test('news import works with the EasyPrivacy /api/collect rule enabled',async()=>{
+ // Real filter: /api/collect|$ping,xmlhttprequest (easyprivacy_general.txt).
+ const filteredRequest=async(url,options)=>{
+  if(url.endsWith('/api/collect'))throw TypeError('NetworkError when attempting to fetch resource.');
+  assert.equal(url,'/api/news/import');assert.equal(options.method,'POST');
+  return Response.json({added:0,existing:5,errors:[]});
+ };
+ await assert.rejects(apiRequest('collect','POST',{},filteredRequest),/Forbindelsen/);
+ assert.deepEqual(await apiRequest(NEWS_IMPORT_PATH,'POST',{},filteredRequest),{added:0,existing:5,errors:[]});
+});
 test('source header is ASCII; a transient GET failure is retried and the complete response returned',async()=>{
  assert.match(SOURCE_USER_AGENT,/^[\x20-\x7e]+$/);
  let count=0;
