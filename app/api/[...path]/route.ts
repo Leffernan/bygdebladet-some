@@ -42,7 +42,8 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
     result=await collect();await db().prepare('UPDATE jobs SET state=?,finished_at=?,result=? WHERE id=?').bind(result.errors.length?'failed':'done',now(),JSON.stringify(result),jobId).run();
    }catch(e){await db().prepare("UPDATE jobs SET state='failed',finished_at=?,result=? WHERE id=?").bind(now(),e instanceof Error?e.message:'Feil',jobId).run();await log('error',e instanceof Error?e.message:'Hentingen feilet.');throw e;}
   }
-  const processed=await processApproved();return json({collection:result,approvedProcessed:processed});
+  // A maintenance read can collect drafts without touching the publishing queue.
+  const processed=b.collectionOnly===true?0:await processApproved();return json({collection:result,approvedProcessed:processed});
  }
  human(req);const member=viewer||await resolveUser(req),actor=member.displayName;
  if(req.method==='POST'&&(action==='profile'||action==='users'||action==='logo')){

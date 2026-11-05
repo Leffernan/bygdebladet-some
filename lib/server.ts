@@ -3,6 +3,7 @@ import { articleUrl, frontpage, parseArticle, ORIGIN, imageUrl } from './article
 import type { Post, Settings } from './types';
 import { metaConnectionStatus } from './meta-credentials';
 import { defaultProfile } from './profile-policy.mjs';
+import { fetchSource } from './source-fetch.mjs';
 export const now = () => new Date().toISOString();
 export function db() { if(!env.DB) throw new Error('Databasen er ikke koblet til.'); return env.DB; }
 export function bucket() { if(!env.BUCKET) throw new Error('Bildelagringen er ikke koblet til.'); return env.BUCKET; }
@@ -34,9 +35,7 @@ export function present(r:any, deliveries:any[]=[]):Post {
 export async function rawPost(id:string):Promise<any> { const row=await db().prepare('SELECT * FROM posts WHERE id=?').bind(id).first(); if(!row) throw new AppError('Posten finnes ikke.',404); return row; }
 export async function postDeliveries(id:string):Promise<any[]> { return (await db().prepare('SELECT * FROM deliveries WHERE post_id=?').bind(id).all()).results; }
 export async function sourceFetch(url:string):Promise<Response> {
-  const res=await fetch(url,{headers:{'User-Agent':'Bygdebladet-SoMe/2.0 (redaksjonelt verktøy; annonse@bygdebladet.com)'},redirect:'manual',signal:AbortSignal.timeout(20000)});
-  if(!res.ok) throw new Error(`Nettavisen svarte med ${res.status}.`);
-  return res;
+  return (await fetchSource(url))!;
 }
 export async function insertArticle(url:string, rank=0,actor='System', batchAt=now()) {
   const target=articleUrl(url);
