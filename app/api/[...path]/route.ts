@@ -2,6 +2,7 @@ import { waitUntil } from 'cloudflare:workers';
 import { db, bucket, human, rawPost, postDeliveries, present, settings, connection, collect, sourceImage, log, now, hash, AppError } from '@/lib/server';
 import { canApprove, editable, osloSlot } from '@/lib/policy.mjs';
 import { imageUrl } from '@/lib/articles.mjs';
+import { formatCaptions } from '@/lib/captions.mjs';
 import { publishOne, processApproved } from '@/lib/meta';
 import { loadMetaCredential, saveMetaCredential, setMetaPublishingEnabled, verifyMetaCredential } from '@/lib/meta-credentials';
 import { resolveUser, listUsers, saveUser } from '@/lib/users';
@@ -114,7 +115,17 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   if(req.method==='PATCH'){
    if(p.revision!==b.revision)throw new AppError('Posten er endret i en annen fane. Last inn på nytt.',409);
    if(!editable(ds) || p.state==='published')throw new AppError('Publisering har startet. Posten er låst for å unngå doble innlegg.',409);
-   const title=String(b.title ?? p.title).trim().slice(0,400), fb=String(b.facebookText ?? p.facebook_text).slice(0,10000),ig=String(b.instagramText ?? p.instagram_text).slice(0,4000);
+   const title=String(b.title ?? p.title).trim().slice(0,400);
+   let fb=b.facebookText==null||b.facebookText===p.facebook_text?p.facebook_text:String(b.facebookText).slice(0,10000);
+   let ig=b.instagramText==null||b.instagramText===p.instagram_text?p.instagram_text:String(b.instagramText).slice(0,4000);
+   if(b.sharedCaption!==undefined){
+    const caption=b.sharedCaption;
+    if(typeof caption?.text!=='string'||typeof caption?.tags!=='string')throw new AppError('Postteksten er ugyldig.');
+    const formatted=formatCaptions(caption.text,p.url,caption.tags);
+    if(formatted.facebookText.length>10000||formatted.instagramText.length>10000)throw new AppError('Postteksten er for lang.');
+    fb=formatted.facebookText;
+    ig=formatted.instagramText;
+   }
    const channels=Array.isArray(b.channels)?[...new Set(b.channels.filter((c:unknown)=>c==='facebook'||c==='instagram'))]:JSON.parse(p.channels);
    if(!title)throw new AppError('Skriv en tittel.');
    const state=b.state==='rejected'?'rejected':'draft';
@@ -127,7 +138,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    await log(state==='rejected'?'rejected':'edited',state==='rejected'?'Posten ble avvist.':'Utkastet ble lagret. Tidligere godkjenning er opphevet.',actor,id);return json(present(await rawPost(id)));
   }
   if(req.method==='POST' && sub==='approve'){
-   canApprove(present(p),b.revision,b.checks);
+   canApprove(present(p),b.revision,b.contentConfirmed===undefined?b.checks:b.contentConfirmed===true);
    if(typeof b.image!=='string' || !b.image.startsWith('data:image/jpeg;base64,'))throw new AppError('Forhåndsvisningen må være ferdig før godkjenning.');
    if(b.image.length>6000000)throw new AppError('Bildet er for stort.');
    const data=Uint8Array.from(atob(b.image.split(',')[1]),c=>c.charCodeAt(0));

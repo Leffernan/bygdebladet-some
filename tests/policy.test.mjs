@@ -1,13 +1,15 @@
-import {formatCaptions, splitCaption} from '../lib/captions.mjs';
+import {formatCaptions, readSharedCaption, splitCaption} from '../lib/captions.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {canApprove,mayPublish,editable,osloSlot} from '../lib/policy.mjs';
 import {frontpage,parseArticle,articleUrl,imageUrl,hashtags} from '../lib/articles.mjs';
 const draft={state:'draft',revision:3,title:'Ei viktig sak',imageUrl:'https://bygdebladet.com/bilder/web/foto.jpg',channels:['facebook','instagram'],instagramText:'Les saka'};
 const checks={content:true,credit:true,privacy:true};
-test('approval requires all human review checks and current revision',()=>{
+test('one explicit human confirmation approves the current saved revision',()=>{
+ assert.equal(canApprove(draft,3,true),true);
+ for(const confirmation of [false,undefined,'true',1])assert.throws(()=>canApprove(draft,3,confirmation),/Bekreft/);
  assert.equal(canApprove(draft,3,checks),true);
- assert.throws(()=>canApprove(draft,2,checks),/endret/);
+ assert.throws(()=>canApprove(draft,2,true),/endret/);
  assert.throws(()=>canApprove(draft,3,{...checks,privacy:false}),/personvern/);
  assert.throws(()=>canApprove({...draft,channels:[]},3,checks),/kanal/);
  assert.throws(()=>canApprove({...draft,instagramText:'a'.repeat(2201)},3,checks),/2200/);
@@ -59,5 +61,16 @@ test('editing the body from either channel keeps the right link line and Instagr
   assert.equal(next.instagramText,edited+'\n\nLes heile saka på bygdebladet.com (lenke i bio)\n\n'+tags);
  }
  const withTrailingNewline=formatCaptions('Tekst\n',url,'#');
- assert.deepEqual(splitCaption(withTrailingNewline.instagramText,'instagram',url,'#'),{text:'Tekst\n',tags:'#'});
+ assert.deepEqual(readSharedCaption({...withTrailingNewline,url,channels:['facebook','instagram']}),{text:'Tekst\n',tags:'#',differs:false});
+});
+
+test('a legacy draft keeps its saved previews until the shared caption is edited',()=>{
+ const url='https://bygdebladet.com/nyheiter/sak/16197';
+ const facebookText=formatCaptions('Tidlegare Facebook-tekst',url).facebookText;
+ const instagramText=formatCaptions('Tidlegare Instagram-tekst',url,'#vestnes').instagramText;
+ const post={url,facebookText,instagramText,channels:['facebook','instagram']};
+ assert.deepEqual(readSharedCaption(post),{text:'Tidlegare Instagram-tekst',tags:'#vestnes',differs:true});
+ assert.equal(readSharedCaption({...post,channels:['facebook']}).text,'Tidlegare Facebook-tekst');
+ const saved={...post,...formatCaptions('Oppdatert tekst',url,'#vestnes')};
+ assert.deepEqual(readSharedCaption(saved),{text:'Oppdatert tekst',tags:'#vestnes',differs:false});
 });
