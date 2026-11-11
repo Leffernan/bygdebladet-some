@@ -7,7 +7,7 @@ import {mayPublish} from '../lib/policy.mjs';
 import {startPublicationMonitor} from '../lib/publication-monitor.mjs';
 
 const code=ts.transpileModule(readFileSync(new URL('../lib/meta.ts',import.meta.url),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
-function fixture(request){
+function fixture(request,{allowImageRead=false}={}){
  const sql=new DatabaseSync(':memory:');
  sql.exec(readFileSync(new URL('../drizzle/0000_thin_ultimo.sql',import.meta.url),'utf8'));
  const old=new Date(Date.now()-180000).toISOString();
@@ -17,7 +17,7 @@ function fixture(request){
  const database={prepare(query){const statement=sql.prepare(query);let args=[];return {bind(...next){args=next;return this;},async run(){const result=statement.run(...args);return {meta:{changes:Number(result.changes)}};},async first(){return statement.get(...args);},async all(){return {results:statement.all(...args)};}};}};
  const config={publishingEnabled:true,facebook:true,instagram:true,pageId:'page',instagramId:'ig'};
  const settings={paused:false};
- const server={db:()=>database,bucket:()=>{throw Error('Must reuse approved image stage');},now:()=>new Date().toISOString(),rawPost:async()=>sql.prepare("SELECT * FROM posts WHERE id='1'").get(),postDeliveries:async()=>sql.prepare("SELECT * FROM deliveries WHERE post_id='1'").all(),connection:async()=>config,settings:async()=>settings,log:async()=>{},hash:async()=>{throw Error('No image changes');}};
+ const server={db:()=>database,bucket:()=>{if(!allowImageRead)throw Error('Must reuse approved image stage');return {get:async()=>({arrayBuffer:async()=>new ArrayBuffer(2)})};},now:()=>new Date().toISOString(),rawPost:async()=>sql.prepare("SELECT * FROM posts WHERE id='1'").get(),postDeliveries:async()=>sql.prepare("SELECT * FROM deliveries WHERE post_id='1'").all(),connection:async()=>config,settings:async()=>settings,log:async()=>{},hash:async()=>{if(!allowImageRead)throw Error('No image changes');return 'digest';}};
  const exports={};
  const require=name=>name==='./server'?server:name==='./policy.mjs'?{mayPublish}:name==='./meta-credentials'?{loadMetaCredential:async()=>({token:'test-only',apiVersion:'v26.0',publishingEnabled:config.publishingEnabled})}:(()=>{throw Error(name);})();
  new Function('require','exports','fetch',code)(require,exports,request);
@@ -62,6 +62,62 @@ test('uncertain publish outcome is checked instead of replaying the publish call
  });
  await f.publish('1');assert.equal((await f.deliveries()).find(d=>d.channel==='instagram').state,'unknown');
  await f.publish('1');assert.equal(sends,1);assert.ok((await f.deliveries()).every(d=>d.state==='published'));f.sql.close();
+});
+test('a canceled Instagram attempt with no saved container resumes the approved snapshot once',async()=>{
+ let sends=0;
+ const f=fixture(async(url,options)=>{
+  if(url.pathname.endsWith('/page/photos')){
+   assert.equal(options.body.get('published'),'false');
+   return response({id:'ig-stage'});
+  }
+  if(url.pathname.endsWith('/ig-stage'))return response({source:'https://example.com/photo.jpg'});
+  if(url.pathname.endsWith('/ig/media')){
+   assert.equal(options.body.get('caption'),'Approved Instagram');
+   return response({id:'ig-container'});
+  }
+  if(url.pathname.endsWith('/ig-container'))return response({status_code:'FINISHED'});
+  if(url.pathname.endsWith('/ig/media_publish')){
+   sends++;
+   assert.equal(f.sql.prepare("SELECT container_id FROM deliveries WHERE channel='instagram'").get().container_id,'ig-container');
+   return response({id:'ig-published'});
+  }
+  if(url.pathname.endsWith('/ig-published'))return response({permalink:'https://instagram.com/p/example'});
+  throw Error('Unexpected request: '+url.pathname);
+ },{allowImageRead:true});
+ f.sql.exec("UPDATE deliveries SET state='unknown',container_id=NULL,stage_id=NULL WHERE channel='instagram'");
+ await Promise.all([f.publish('1'),f.publish('1')]);
+ assert.equal(sends,1);
+ assert.ok((await f.deliveries()).every(d=>d.state==='published'));
+ assert.equal(f.sql.prepare("SELECT approved_revision FROM posts WHERE id='1'").get().approved_revision,3);
+ f.sql.close();
+});
+test('a known Instagram container is checked and only that container can resume',async()=>{
+ let checks=0,sends=0;
+ const f=fixture(async(url,options)=>{
+  if(url.pathname.endsWith('/ig-container')){checks++;return response({status_code:'FINISHED'});}
+  if(url.pathname.endsWith('/ig/media_publish')){
+   sends++;
+   assert.equal(options.body.get('creation_id'),'ig-container');
+   return response({id:'ig-published'});
+  }
+  if(url.pathname.endsWith('/ig-published'))return response({});
+  throw Error('Unexpected request: '+url.pathname);
+ });
+ f.sql.exec("UPDATE deliveries SET state='unknown' WHERE channel='instagram'");
+ await Promise.all([f.publish('1'),f.publish('1')]);
+ assert.equal(checks,1);assert.equal(sends,1);f.sql.close();
+});
+test('a failed Instagram status lookup preserves the existing container and shows the cause',async()=>{
+ const f=fixture(async(url,options)=>{
+  assert.equal(options.method,'GET');
+  return Response.json({error:{code:190}},{status:400});
+ });
+ f.sql.exec("UPDATE deliveries SET state='unknown' WHERE channel='instagram'");
+ await f.publish('1');
+ const d=(await f.deliveries()).find(d=>d.channel==='instagram');
+ assert.equal(d.state,'unknown');assert.equal(d.container_id,'ig-container');
+ assert.match(d.error,/Instagram.*kode 190/);
+ f.sql.close();
 });
 test('an unfinished container stays processing with a useful message, not a new container',async()=>{
  let checks=0;const f=fixture(async(url,options)=>{assert.equal(options.method,'GET');checks++;return response({status_code:'IN_PROGRESS'});});

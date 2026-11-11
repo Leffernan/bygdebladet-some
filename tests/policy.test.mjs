@@ -1,3 +1,4 @@
+import {formatCaptions, splitCaption} from '../lib/captions.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {canApprove,mayPublish,editable,osloSlot} from '../lib/policy.mjs';
@@ -45,4 +46,18 @@ test('Oslo schedule follows DST; extra winter/summer run does not open a second 
  assert.match(osloSlot(new Date('2026-07-04T04:15:00Z')),/2026-07-04-360/);
  assert.equal(osloSlot(new Date('2026-11-04T04:15:00Z')),null);
  assert.equal(osloSlot(new Date('2026-07-04T05:15:00Z')),null);
+});
+
+test('editing the body from either channel keeps the right link line and Instagram hashtags',()=>{
+ const url='https://bygdebladet.com/nyheiter/sak/16197';
+ const tags='#bygdebladet #ålesund';
+ const initial=formatCaptions('Gammal tekst',url,tags);
+ for(const channel of ['facebook','instagram']){
+  const edited=splitCaption(initial[channel+'Text'],channel,url).text+'\n\nNytt avsnitt.';
+  const next=formatCaptions(edited,url,splitCaption(initial.instagramText,'instagram',url).tags);
+  assert.equal(next.facebookText,edited+'\n\nLes heile saka: '+url);
+  assert.equal(next.instagramText,edited+'\n\nLes heile saka på bygdebladet.com (lenke i bio)\n\n'+tags);
+ }
+ const withTrailingNewline=formatCaptions('Tekst\n',url,'#');
+ assert.deepEqual(splitCaption(withTrailingNewline.instagramText,'instagram',url,'#'),{text:'Tekst\n',tags:'#'});
 });

@@ -1,3 +1,4 @@
+import { waitUntil } from 'cloudflare:workers';
 import { db, bucket, human, rawPost, postDeliveries, present, settings, connection, collect, sourceImage, log, now, hash, AppError } from '@/lib/server';
 import { canApprove, editable, osloSlot } from '@/lib/policy.mjs';
 import { imageUrl } from '@/lib/articles.mjs';
@@ -8,6 +9,10 @@ import { profileInput, validateLogo } from '@/lib/profile-policy.mjs';
 export const dynamic='force-dynamic';
 type Ctx={params:Promise<{path:string[]}>};
 const json=(data:unknown,status=200)=>Response.json(data,{status,headers:{'Cache-Control':'no-store'}});
+function keepRunning<T>(job:Promise<T>) {
+ waitUntil(job.catch(()=>{}));
+ return job;
+}
 async function body(req:Request):Promise<any> {if(Number(req.headers.get('content-length') || 0)>8000000)throw new AppError('Filen er for stor.');return req.json();}
 async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
  const path=(await ctx.params).path, action=path[0];
@@ -43,7 +48,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    }catch(e){await db().prepare("UPDATE jobs SET state='failed',finished_at=?,result=? WHERE id=?").bind(now(),e instanceof Error?e.message:'Feil',jobId).run();await log('error',e instanceof Error?e.message:'Hentingen feilet.');throw e;}
   }
   // A maintenance read can collect drafts without touching the publishing queue.
-  const processed=b.collectionOnly===true?0:await processApproved();return json({collection:result,approvedProcessed:processed});
+  const processed=b.collectionOnly===true?0:await keepRunning(processApproved());return json({collection:result,approvedProcessed:processed});
  }
  human(req);const member=viewer||await resolveUser(req),actor=member.displayName;
  if(req.method==='POST'&&(action==='profile'||action==='users'||action==='logo')){
@@ -135,14 +140,16 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    ]);
    if(!result[0].meta.changes)throw new AppError('Posten er endret. Kontroller den nyeste versjonen.',409);
    await log('approved',`Versjon ${b.revision} godkjent for ${channels.join(' og ')}.`,actor,id);
-   if(b.publishNow && !(await settings()).paused)await publishOne(id);
+   if(b.publishNow && !(await settings()).paused){
+    waitUntil(publishOne(id).catch(()=>log('error','Publiseringsjobben ble avbrutt. Bruk «Kontroller / publiser» for å fortsette.','Publisering',id)));
+   }
    return json({approved:true,deliveries:await postDeliveries(id)});
   }
   if(req.method==='POST' && sub==='publish'){
    if((await settings()).paused)throw new AppError('Publisering er satt på pause.');
    if(p.state!=='approved' || p.approved_revision!==p.revision)throw new AppError('Posten må godkjennes før publisering.',409);
    const cfg=await connection();if(!cfg.publishingEnabled)throw new AppError('Aktiver publisering under Innstillinger først.');if(JSON.parse(p.channels).some((c:'facebook'|'instagram')=>!cfg[c]))throw new AppError('Koble til de valgte Meta-kontoene først.');
-   return json({deliveries:await publishOne(id,{continuationOnly:b.continuationOnly===true})});
+   return json({deliveries:await keepRunning(publishOne(id,{continuationOnly:b.continuationOnly===true}))});
   }
  }
  throw new AppError('Fant ikke handlingen.',404);
