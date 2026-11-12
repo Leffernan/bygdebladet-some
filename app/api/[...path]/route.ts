@@ -128,10 +128,12 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
    }
    const channels=Array.isArray(b.channels)?[...new Set(b.channels.filter((c:unknown)=>c==='facebook'||c==='instagram'))]:JSON.parse(p.channels);
    if(!title)throw new AppError('Skriv en tittel.');
+   if(b.emphasized!==undefined&&typeof b.emphasized!=='boolean')throw new AppError('Velg om saken skal fremheves.');
+   const emphasized=b.emphasized??!!p.emphasized;
    const state=b.state==='rejected'?'rejected':'draft';
    const result=await db().batch([
-    db().prepare(`UPDATE posts SET title=?,category=?,image_url=?,credit=?,ai=?,crop_x=?,crop_y=?,facebook_text=?,instagram_text=?,alt_text=?,channels=?,state=?,revision=revision+1,approved_revision=NULL,approved_at=NULL,approved_by=NULL,approved_by_user_id=NULL,image_key=NULL,image_hash=NULL,updated_at=? WHERE id=? AND revision=? AND state!='published' AND NOT EXISTS(SELECT 1 FROM deliveries WHERE post_id=? AND state IN ('sending','unknown','published','processing'))`)
-     .bind(title,String(b.category ?? p.category).slice(0,60),imageUrl(b.imageUrl ?? p.image_url),String(b.credit ?? p.credit).slice(0,180),Number(b.ai ?? !!p.ai),Math.max(0,Math.min(1,Number(b.cropX ?? p.crop_x))),Math.max(0,Math.min(1,Number(b.cropY ?? p.crop_y))),fb,ig,String(b.altText ?? p.alt_text).slice(0,1000),JSON.stringify(channels),state,now(),id,p.revision,id),
+    db().prepare(`UPDATE posts SET title=?,category=?,image_url=?,credit=?,ai=?,emphasized=?,crop_x=?,crop_y=?,facebook_text=?,instagram_text=?,alt_text=?,channels=?,state=?,revision=revision+1,approved_revision=NULL,approved_at=NULL,approved_by=NULL,approved_by_user_id=NULL,image_key=NULL,image_hash=NULL,updated_at=? WHERE id=? AND revision=? AND state!='published' AND NOT EXISTS(SELECT 1 FROM deliveries WHERE post_id=? AND state IN ('sending','unknown','published','processing'))`)
+     .bind(title,String(b.category ?? p.category).slice(0,60),imageUrl(b.imageUrl ?? p.image_url),String(b.credit ?? p.credit).slice(0,180),Number(b.ai ?? !!p.ai),Number(emphasized),Math.max(0,Math.min(1,Number(b.cropX ?? p.crop_x))),Math.max(0,Math.min(1,Number(b.cropY ?? p.crop_y))),fb,ig,String(b.altText ?? p.alt_text).slice(0,1000),JSON.stringify(channels),state,now(),id,p.revision,id),
     db().prepare("DELETE FROM deliveries WHERE post_id=? AND state IN ('ready','failed') AND EXISTS(SELECT 1 FROM posts WHERE id=? AND revision=? AND approved_revision IS NULL)").bind(id,id,p.revision+1),
    ]);
    if(!result[0].meta.changes)throw new AppError('Posten ble endret eller publisering startet. Last inn på nytt.',409);
@@ -139,6 +141,7 @@ async function dispatch(req:Request,ctx:Ctx):Promise<Response> {
   }
   if(req.method==='POST' && sub==='approve'){
    canApprove(present(p),b.revision,b.contentConfirmed===undefined?b.checks:b.contentConfirmed===true);
+   if((b.emphasized??false)!==!!p.emphasized)throw new AppError('Bildemalen er endret. Last inn posten på nytt før du godkjenner.',409);
    if(typeof b.image!=='string' || !b.image.startsWith('data:image/jpeg;base64,'))throw new AppError('Forhåndsvisningen må være ferdig før godkjenning.');
    if(b.image.length>6000000)throw new AppError('Bildet er for stort.');
    const data=Uint8Array.from(atob(b.image.split(',')[1]),c=>c.charCodeAt(0));

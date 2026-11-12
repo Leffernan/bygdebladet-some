@@ -28,7 +28,7 @@ export async function settings():Promise<Settings> {
   return {paused:false,topCount:5,autoCollect:true,...defaultProfile,...data};
 }
 export function present(r:any, deliveries:any[]=[]):Post {
-  return {id:r.id,url:r.url,title:r.title,intro:r.intro,category:r.category,imageUrl:r.image_url,credit:r.credit,ai:!!r.ai,cropX:r.crop_x,cropY:r.crop_y,
+  return {id:r.id,url:r.url,title:r.title,intro:r.intro,category:r.category,imageUrl:r.image_url,credit:r.credit,ai:!!r.ai,emphasized:!!r.emphasized,cropX:r.crop_x,cropY:r.crop_y,
     facebookText:r.facebook_text,instagramText:r.instagram_text,altText:r.alt_text,channels:JSON.parse(r.channels),warnings:JSON.parse(r.warnings),rank:r.rank,
     state:r.state,revision:r.revision,approvedAt:r.approved_at,approvedBy:r.approved_by,approvedByUserId:r.approved_by_user_id,createdAt:r.created_at,updatedAt:r.updated_at,deliveries};
 }

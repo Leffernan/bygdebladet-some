@@ -17,3 +17,19 @@
 .approval-checks label { margin-top: 0; }
 .approval-checks input { flex-shrink: 0; }
 .approval-checks small { display: block; margin-top: 4px; font-size: inherit; }
+
+.emphasis-option {
+  align-items: flex-start;
+  padding: 12px 14px;
+  border: 1px solid #dfe5eb;
+  border-radius: 7px;
+  background: #f5f7f9;
+}
+.emphasis-option input { flex-shrink: 0; }
+.emphasis-option small {
+  display: block;
+  margin-top: 3px;
+  font-size: inherit;
+  font-weight: 400;
+  color: #626b73;
+}

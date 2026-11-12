@@ -4,6 +4,7 @@ export const posts = sqliteTable('posts', {
   title: text('title').notNull(), intro: text('intro').notNull().default(''),
   category: text('category').notNull().default('Nyheiter'), imageUrl: text('image_url').notNull(),
   credit: text('credit').notNull().default(''), ai: integer('ai').notNull().default(0),
+  emphasized: integer('emphasized').notNull().default(0),
   cropX: real('crop_x').notNull().default(0.5), cropY: real('crop_y').notNull().default(0.4),
   facebookText: text('facebook_text').notNull(), instagramText: text('instagram_text').notNull(),
   altText: text('alt_text').notNull().default(''), channels: text('channels').notNull().default('["facebook","instagram"]'),
