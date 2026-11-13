@@ -44,6 +44,9 @@ export default defineConfig(async ({ command }) => {
   const { cloudflare } = await import("@cloudflare/vite-plugin");
 
   return {
+    define: {
+      __APP_VERSION__: JSON.stringify(process.env.SITES_APP_VERSION ?? "development"),
+    },
     server: {
       ...(managedLinux
         ? { host: "0.0.0.0", allowedHosts: ["terminal.local"] }

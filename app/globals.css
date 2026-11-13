@@ -33,3 +33,31 @@
   font-weight: 400;
   color: #626b73;
 }
+
+.app-update-notice {
+  position: fixed;
+  inset: 50% auto auto 50%;
+  z-index: 80;
+  transform: translate(-50%, -50%);
+  display: flex;
+  gap: 12px;
+  width: min(420px, calc(100% - 32px));
+  padding: 18px;
+  border: 1px solid #e7c58b;
+  border-radius: 12px;
+  background: #fff;
+  color: #20252b;
+  box-shadow: 0 12px 40px #1d242c45;
+}
+.app-update-icon {
+  display: grid;
+  place-items: center;
+  flex: 0 0 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: #fff0d7;
+  color: #8c530e;
+}
+.app-update-content h2 { margin: 0; font-size: 16px; }
+.app-update-content p { margin: 6px 0 0; color: #535e68; font-size: 13px; line-height: 1.45; }
+.app-update-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }

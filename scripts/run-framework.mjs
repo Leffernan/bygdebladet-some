@@ -1,9 +1,11 @@
 import { spawnSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { readExecutionProfile } from "./execution-profile.mjs";
 
 const [command, ...args] = process.argv.slice(2);
 if (!["dev", "build"].includes(command)) throw new Error("Expected dev or build.");
+if (command === "build") process.env.SITES_APP_VERSION ??= randomUUID();
 const managedLinux = readExecutionProfile() === "managed-linux";
 
 if (managedLinux && command === "build") {
